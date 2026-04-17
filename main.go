@@ -27,6 +27,7 @@ func main() {
 	urlFlag := flag.String("url", envOr("TOOLSMITH_URL", ""), "Chat completions endpoint URL")
 	modelFlag := flag.String("model", envOr("TOOLSMITH_MODEL", ""), "Model identifier")
 	apiKeyFlag := flag.String("api-key", envOr("TOOLSMITH_API_KEY", ""), "API key (openai-compatible providers)")
+	nameFlag := flag.String("agent-name", envOr("TOOLSMITH_AGENT_NAME", "agent"), "Display name for the agent")
 	flag.Parse()
 
 	if *modelFlag == "" {
@@ -48,8 +49,8 @@ func main() {
 		return scanner.Text(), true
 	}
 
-	toolSet := []tools.ToolDefinition{tools.ReadFile, tools.ListFiles, tools.EditFile, tools.Bash, tools.WebFetch}
-	agent := NewAgent(provider, getUserMessage, toolSet)
+	toolSet := []tools.ToolDefinition{tools.ReadFile, tools.ListFiles, tools.EditFile, tools.Grep, tools.Bash, tools.WebFetch}
+	agent := NewAgent(provider, getUserMessage, toolSet, *nameFlag)
 
 	if err := agent.Run(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())

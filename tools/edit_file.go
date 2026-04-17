@@ -74,7 +74,12 @@ func editFileFn(input json.RawMessage) (string, error) {
 	}
 
 	updated := strings.Replace(content, in.OldStr, in.NewStr, 1)
-	if err := os.WriteFile(in.Path, []byte(updated), 0644); err != nil {
+
+	info, err := os.Stat(in.Path)
+	if err != nil {
+		return "", err
+	}
+	if err := atomicWrite(in.Path, []byte(updated), info.Mode().Perm()); err != nil {
 		return "", err
 	}
 	return "OK", nil
@@ -86,8 +91,31 @@ func createFile(path, content string) (string, error) {
 			return "", err
 		}
 	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := atomicWrite(path, []byte(content), 0644); err != nil {
 		return "", err
 	}
 	return "created " + path, nil
+}
+
+func atomicWrite(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".edit-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }

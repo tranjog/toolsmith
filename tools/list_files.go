@@ -3,14 +3,16 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"strings"
 )
 
+const listFilesMaxEntries = 2000
+
 var ListFiles = ToolDefinition{
 	Name:        "list_files",
-	Description: "List files and directories at given path. If no path, lists current directory. Directories end with '/'.",
+	Description: "List files and directories at given path (recursive). Directories end with '/'. Skips common vendored dirs (.git, node_modules, vendor, dist, build, target, .next, __pycache__) and dotfiles. Capped at 2000 entries.",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -40,9 +42,14 @@ func listFilesFn(input json.RawMessage) (string, error) {
 	}
 
 	var entries []string
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	truncated := false
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
@@ -51,21 +58,30 @@ func listFilesFn(input json.RawMessage) (string, error) {
 		if rel == "." {
 			return nil
 		}
-		if info.IsDir() {
-			entries = append(entries, rel+"/")
-			if strings.HasPrefix(info.Name(), ".") || info.Name() == "node_modules" {
-				return filepath.SkipDir
+		if d.IsDir() {
+			if skipDirs[d.Name()] || (strings.HasPrefix(d.Name(), ".") && d.Name() != ".") {
+				return fs.SkipDir
 			}
-			return nil
+			entries = append(entries, rel+"/")
+		} else {
+			entries = append(entries, rel)
 		}
-		entries = append(entries, rel)
+		if len(entries) >= listFilesMaxEntries {
+			truncated = true
+			return fs.SkipAll
+		}
 		return nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("walk failed: %w", err)
 	}
 
-	out, err := json.Marshal(entries)
+	payload := map[string]any{"entries": entries}
+	if truncated {
+		payload["truncated"] = true
+		payload["limit"] = listFilesMaxEntries
+	}
+	out, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}

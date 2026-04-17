@@ -1,22 +1,27 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html"
-	"os/exec"
+	"io"
+	"net/http"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
 	maxWebFetchChars = 10000
-	ctSentinel       = "__WF_CT__"
+	webFetchTimeout  = 15 * time.Second
+	webFetchMaxBytes = 2 * 1024 * 1024
+	webFetchUA       = "toolsmith/1.0"
 )
 
 var WebFetch = ToolDefinition{
 	Name:        "web_fetch",
-	Description: "Fetch a URL via curl. Returns JSON bodies verbatim; strips tags/scripts/styles from HTML. Useful for search engine result pages or JSON APIs. Output truncated at 10000 chars.",
+	Description: "Fetch a URL. Returns JSON bodies verbatim; strips tags/scripts/styles from HTML. Useful for search engine result pages or JSON APIs. Output truncated at 10000 chars.",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -34,6 +39,8 @@ type webFetchInput struct {
 	URL string `json:"url"`
 }
 
+var webFetchClient = &http.Client{Timeout: webFetchTimeout}
+
 func webFetchFn(input json.RawMessage) (string, error) {
 	var in webFetchInput
 	if err := json.Unmarshal(input, &in); err != nil {
@@ -46,37 +53,41 @@ func webFetchFn(input json.RawMessage) (string, error) {
 		return "", fmt.Errorf("url must start with http:// or https://")
 	}
 
-	cmd := exec.Command("curl",
-		"-sL",
-		"--max-time", "15",
-		"-A", "Mozilla/5.0 (compatible; gemma-agent/1.0)",
-		"-w", "\n"+ctSentinel+"%{content_type}",
-		in.URL,
-	)
-	out, err := cmd.CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), webFetchTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", in.URL, nil)
 	if err != nil {
-		return string(out), fmt.Errorf("curl failed: %w", err)
+		return "", err
+	}
+	req.Header.Set("User-Agent", webFetchUA)
+
+	resp, err := webFetchClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, webFetchMaxBytes))
+	if err != nil {
+		return "", err
 	}
 
-	body, ct := splitContentType(string(out))
-	ct = strings.ToLower(ct)
+	ct := strings.ToLower(resp.Header.Get("Content-Type"))
+	text := string(body)
+
+	if resp.StatusCode >= 400 {
+		return truncate(text, maxWebFetchChars), fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
 
 	switch {
 	case strings.Contains(ct, "json"):
-		return truncate(body, maxWebFetchChars), nil
+		return truncate(text, maxWebFetchChars), nil
 	case strings.Contains(ct, "html"), strings.Contains(ct, "xml"):
-		return truncate(stripHTML(body), maxWebFetchChars), nil
+		return truncate(stripHTML(text), maxWebFetchChars), nil
 	default:
-		return truncate(body, maxWebFetchChars), nil
+		return truncate(text, maxWebFetchChars), nil
 	}
-}
-
-func splitContentType(s string) (body, ct string) {
-	idx := strings.LastIndex(s, ctSentinel)
-	if idx < 0 {
-		return s, ""
-	}
-	return strings.TrimRight(s[:idx], "\n"), strings.TrimSpace(s[idx+len(ctSentinel):])
 }
 
 var (

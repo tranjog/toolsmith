@@ -12,13 +12,15 @@ type Agent struct {
 	provider       llm.Provider
 	getUserMessage func() (string, bool)
 	tools          []tools.ToolDefinition
+	name           string
 }
 
-func NewAgent(provider llm.Provider, getUserMessage func() (string, bool), toolSet []tools.ToolDefinition) *Agent {
+func NewAgent(provider llm.Provider, getUserMessage func() (string, bool), toolSet []tools.ToolDefinition, name string) *Agent {
 	return &Agent{
 		provider:       provider,
 		getUserMessage: getUserMessage,
 		tools:          toolSet,
+		name:           name,
 	}
 }
 
@@ -26,7 +28,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	conversation := []llm.Message{}
 	wireTools := a.llmTools()
 
-	fmt.Printf("Chat with %s (use 'ctrl-c' to quit)\n", a.provider.Model())
+	fmt.Printf("Chat with %s [%s] (use 'ctrl-c' to quit)\n", a.name, a.provider.Model())
 
 	readUser := true
 	for {
@@ -46,7 +48,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		conversation = append(conversation, reply)
 
 		if reply.Content != "" {
-			fmt.Printf("\u001b[93massistant\u001b[0m: %s\n", reply.Content)
+			fmt.Printf("\u001b[93m%s\u001b[0m: %s\n", a.name, reply.Content)
 		}
 
 		if len(reply.ToolCalls) == 0 {
