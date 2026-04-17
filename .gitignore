@@ -1,0 +1,17 @@
+# Secrets
+.env
+
+# Go build output
+/agent
+/toolsmith
+*.exe
+*.test
+*.out
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Claude local state
+.claude/
