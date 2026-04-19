@@ -64,7 +64,7 @@ func main() {
 	}
 
 	registry := tools.NewRegistry(tools.ReadFile, tools.ListFiles, tools.EditFile, tools.Grep, tools.Bash, tools.WebFetch)
-	agent := NewAgent(provider, getUserMessage, registry.All(), *nameFlag, *logTokensFlag)
+	agent := NewAgent(provider, getUserMessage, registry, registry.Names(), *nameFlag, *logTokensFlag)
 
 	if err := agent.Run(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())

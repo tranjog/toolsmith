@@ -11,16 +11,22 @@ import (
 type Agent struct {
 	provider       llm.Provider
 	getUserMessage func() (string, bool)
-	tools          []tools.ToolDefinition
+	registry       *tools.Registry
+	active         map[string]bool
 	name           string
 	logTokens      bool
 }
 
-func NewAgent(provider llm.Provider, getUserMessage func() (string, bool), toolSet []tools.ToolDefinition, name string, logTokens bool) *Agent {
+func NewAgent(provider llm.Provider, getUserMessage func() (string, bool), registry *tools.Registry, activeNames []string, name string, logTokens bool) *Agent {
+	active := make(map[string]bool, len(activeNames))
+	for _, n := range activeNames {
+		active[n] = true
+	}
 	return &Agent{
 		provider:       provider,
 		getUserMessage: getUserMessage,
-		tools:          toolSet,
+		registry:       registry,
+		active:         active,
 		name:           name,
 		logTokens:      logTokens,
 	}
@@ -28,7 +34,6 @@ func NewAgent(provider llm.Provider, getUserMessage func() (string, bool), toolS
 
 func (a *Agent) Run(ctx context.Context) error {
 	conversation := []llm.Message{}
-	wireTools := a.llmTools()
 
 	fmt.Printf("Chat with %s [%s] (use 'ctrl-c' to quit)\n", a.name, a.provider.Model())
 
@@ -43,7 +48,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			conversation = append(conversation, llm.Message{Role: "user", Content: userInput})
 		}
 
-		reply, err := a.provider.Chat(ctx, conversation, wireTools)
+		reply, err := a.provider.Chat(ctx, conversation, a.llmTools())
 		if err != nil {
 			return err
 		}
@@ -77,26 +82,31 @@ func (a *Agent) Run(ctx context.Context) error {
 
 func (a *Agent) dispatchTool(tc llm.ToolCall) string {
 	fmt.Printf("\u001b[92mtool\u001b[0m: %s(%s)\n", tc.Name, string(tc.Arguments))
-	for _, t := range a.tools {
-		if t.Name != tc.Name {
-			continue
-		}
-		out, err := t.Function(tc.Arguments)
-		if err != nil {
-			return fmt.Sprintf("error: %s\n%s", err.Error(), out)
-		}
-		return out
+	def, ok := a.registry.Get(tc.Name)
+	if !ok {
+		return fmt.Sprintf("error: tool %q not found", tc.Name)
 	}
-	return fmt.Sprintf("error: tool %q not found", tc.Name)
+	if !a.active[tc.Name] {
+		return fmt.Sprintf("error: tool %q not loaded", tc.Name)
+	}
+	out, err := def.Function(tc.Arguments)
+	if err != nil {
+		return fmt.Sprintf("error: %s\n%s", err.Error(), out)
+	}
+	return out
 }
 
 func (a *Agent) llmTools() []llm.Tool {
-	out := make([]llm.Tool, 0, len(a.tools))
-	for _, t := range a.tools {
+	out := make([]llm.Tool, 0, len(a.active))
+	for _, name := range a.registry.Names() {
+		if !a.active[name] {
+			continue
+		}
+		def, _ := a.registry.Get(name)
 		out = append(out, llm.Tool{
-			Name:        t.Name,
-			Description: t.Description,
-			Parameters:  t.InputSchema,
+			Name:        def.Name,
+			Description: def.Description,
+			Parameters:  def.InputSchema,
 		})
 	}
 	return out
