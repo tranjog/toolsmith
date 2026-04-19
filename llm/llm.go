@@ -6,11 +6,13 @@ import (
 )
 
 type Message struct {
-	Role       string
-	Content    string
-	ToolCalls  []ToolCall
-	ToolName   string
-	ToolCallID string
+	Role             string
+	Content          string
+	ToolCalls        []ToolCall
+	ToolName         string
+	ToolCallID       string
+	PromptTokens     int
+	CompletionTokens int
 }
 
 type ToolCall struct {

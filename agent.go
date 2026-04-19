@@ -13,14 +13,16 @@ type Agent struct {
 	getUserMessage func() (string, bool)
 	tools          []tools.ToolDefinition
 	name           string
+	logTokens      bool
 }
 
-func NewAgent(provider llm.Provider, getUserMessage func() (string, bool), toolSet []tools.ToolDefinition, name string) *Agent {
+func NewAgent(provider llm.Provider, getUserMessage func() (string, bool), toolSet []tools.ToolDefinition, name string, logTokens bool) *Agent {
 	return &Agent{
 		provider:       provider,
 		getUserMessage: getUserMessage,
 		tools:          toolSet,
 		name:           name,
+		logTokens:      logTokens,
 	}
 }
 
@@ -46,6 +48,10 @@ func (a *Agent) Run(ctx context.Context) error {
 			return err
 		}
 		conversation = append(conversation, reply)
+
+		if a.logTokens {
+			fmt.Printf("\u001b[90m[tokens] prompt=%d completion=%d\u001b[0m\n", reply.PromptTokens, reply.CompletionTokens)
+		}
 
 		if reply.Content != "" {
 			fmt.Printf("\u001b[93m%s\u001b[0m: %s\n", a.name, reply.Content)

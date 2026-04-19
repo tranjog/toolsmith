@@ -63,6 +63,10 @@ type openaiChatResponse struct {
 	Choices []struct {
 		Message openaiMessage `json:"message"`
 	} `json:"choices"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 }
 
 func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []Tool) (Message, error) {
@@ -137,7 +141,12 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 	}
 	msg := parsed.Choices[0].Message
 
-	out := Message{Role: msg.Role, Content: msg.Content}
+	out := Message{
+		Role:             msg.Role,
+		Content:          msg.Content,
+		PromptTokens:     parsed.Usage.PromptTokens,
+		CompletionTokens: parsed.Usage.CompletionTokens,
+	}
 	for _, tc := range msg.ToolCalls {
 		out.ToolCalls = append(out.ToolCalls, ToolCall{
 			ID:        tc.ID,

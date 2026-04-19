@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 
 	"agent/llm"
 	"agent/tools"
@@ -18,6 +19,18 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+func envBool(key string) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return false
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false
+	}
+	return b
+}
+
 func main() {
 	if err := loadEnvFile(".env"); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: .env load failed: %s\n", err)
@@ -28,6 +41,7 @@ func main() {
 	modelFlag := flag.String("model", envOr("TOOLSMITH_MODEL", ""), "Model identifier")
 	apiKeyFlag := flag.String("api-key", envOr("TOOLSMITH_API_KEY", ""), "API key (openai-compatible providers)")
 	nameFlag := flag.String("agent-name", envOr("TOOLSMITH_AGENT_NAME", "agent"), "Display name for the agent")
+	logTokensFlag := flag.Bool("log-tokens", envBool("TOOLSMITH_LOG_TOKENS"), "Log prompt/completion token counts per turn")
 	flag.Parse()
 
 	if *modelFlag == "" {
@@ -50,7 +64,7 @@ func main() {
 	}
 
 	toolSet := []tools.ToolDefinition{tools.ReadFile, tools.ListFiles, tools.EditFile, tools.Grep, tools.Bash, tools.WebFetch}
-	agent := NewAgent(provider, getUserMessage, toolSet, *nameFlag)
+	agent := NewAgent(provider, getUserMessage, toolSet, *nameFlag, *logTokensFlag)
 
 	if err := agent.Run(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())

@@ -55,8 +55,10 @@ type ollamaChatRequest struct {
 }
 
 type ollamaChatResponse struct {
-	Message ollamaMessage `json:"message"`
-	Done    bool          `json:"done"`
+	Message         ollamaMessage `json:"message"`
+	Done            bool          `json:"done"`
+	PromptEvalCount int           `json:"prompt_eval_count"`
+	EvalCount       int           `json:"eval_count"`
 }
 
 func (p *OllamaProvider) Chat(ctx context.Context, messages []Message, tools []Tool) (Message, error) {
@@ -114,7 +116,12 @@ func (p *OllamaProvider) Chat(ctx context.Context, messages []Message, tools []T
 		return Message{}, err
 	}
 
-	out := Message{Role: parsed.Message.Role, Content: parsed.Message.Content}
+	out := Message{
+		Role:             parsed.Message.Role,
+		Content:          parsed.Message.Content,
+		PromptTokens:     parsed.PromptEvalCount,
+		CompletionTokens: parsed.EvalCount,
+	}
 	for _, tc := range parsed.Message.ToolCalls {
 		out.ToolCalls = append(out.ToolCalls, ToolCall{
 			Name:      tc.Function.Name,
