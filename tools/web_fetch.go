@@ -20,8 +20,10 @@ const (
 )
 
 var WebFetch = ToolDefinition{
-	Name:        "web_fetch",
-	Description: "Fetch a URL. Returns JSON bodies verbatim; strips tags/scripts/styles from HTML. Useful for search engine result pages or JSON APIs. Output truncated at 10000 chars.",
+	Name:             "web_fetch",
+	Description:      "Fetch a URL. Returns JSON bodies verbatim; strips tags/scripts/styles from HTML. Useful for search engine result pages or JSON APIs. Output truncated at 10000 chars.",
+	ShortDescription: "Fetch a URL and return text",
+	Category:         "web",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{

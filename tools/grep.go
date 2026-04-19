@@ -13,8 +13,10 @@ import (
 )
 
 var Grep = ToolDefinition{
-	Name:        "grep",
-	Description: "Search file contents with a regex. Returns matching lines as path:line:text. Skips binary files and common vendored dirs (.git, node_modules, vendor, dist, build, target, .next, __pycache__).",
+	Name:             "grep",
+	Description:      "Search file contents with a regex. Returns matching lines as path:line:text. Skips binary files and common vendored dirs (.git, node_modules, vendor, dist, build, target, .next, __pycache__).",
+	ShortDescription: "Search file contents by regex",
+	Category:         "fs",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{

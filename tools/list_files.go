@@ -11,8 +11,10 @@ import (
 const listFilesMaxEntries = 2000
 
 var ListFiles = ToolDefinition{
-	Name:        "list_files",
-	Description: "List files and directories at given path (recursive). Directories end with '/'. Skips common vendored dirs (.git, node_modules, vendor, dist, build, target, .next, __pycache__) and dotfiles. Capped at 2000 entries.",
+	Name:             "list_files",
+	Description:      "List files and directories at given path (recursive). Directories end with '/'. Skips common vendored dirs (.git, node_modules, vendor, dist, build, target, .next, __pycache__) and dotfiles. Capped at 2000 entries.",
+	ShortDescription: "List files and directories",
+	Category:         "fs",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
