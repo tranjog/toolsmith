@@ -42,6 +42,7 @@ func main() {
 	apiKeyFlag := flag.String("api-key", envOr("TOOLSMITH_API_KEY", ""), "API key (openai-compatible providers)")
 	nameFlag := flag.String("agent-name", envOr("TOOLSMITH_AGENT_NAME", "agent"), "Display name for the agent")
 	logTokensFlag := flag.Bool("log-tokens", envBool("TOOLSMITH_LOG_TOKENS"), "Log prompt/completion token counts per turn")
+	discoveryFlag := flag.String("tool-discovery", envOr("TOOLSMITH_TOOL_DISCOVERY", "static"), "Tool exposure: static | progressive")
 	flag.Parse()
 
 	if *modelFlag == "" {
@@ -64,7 +65,21 @@ func main() {
 	}
 
 	registry := tools.NewRegistry(tools.ReadFile, tools.ListFiles, tools.EditFile, tools.Grep, tools.Bash, tools.WebFetch)
-	agent := NewAgent(provider, getUserMessage, registry, registry.Names(), *nameFlag, *logTokensFlag)
+
+	var progressive bool
+	var initialActive []string
+	switch *discoveryFlag {
+	case "static":
+		initialActive = registry.Names()
+	case "progressive":
+		progressive = true
+		initialActive = nil
+	default:
+		fmt.Fprintf(os.Stderr, "error: unknown -tool-discovery %q (want: static | progressive)\n", *discoveryFlag)
+		os.Exit(2)
+	}
+
+	agent := NewAgent(provider, getUserMessage, registry, initialActive, *nameFlag, *logTokensFlag, progressive)
 
 	if err := agent.Run(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
