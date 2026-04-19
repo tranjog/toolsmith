@@ -9,14 +9,17 @@ import (
 )
 
 type Agent struct {
-	provider       llm.Provider
-	getUserMessage func() (string, bool)
-	registry       *tools.Registry
-	active         map[string]bool
-	metaTools      []tools.ToolDefinition
-	systemPrompt   string
-	name           string
-	logTokens      bool
+	provider             llm.Provider
+	getUserMessage       func() (string, bool)
+	registry             *tools.Registry
+	active               map[string]bool
+	metaTools            []tools.ToolDefinition
+	systemPrompt         string
+	name                 string
+	logTokens            bool
+	turnCount            int
+	promptTokenTotal     int
+	completionTokenTotal int
 }
 
 func NewAgent(provider llm.Provider, getUserMessage func() (string, bool), registry *tools.Registry, activeNames []string, name string, logTokens bool, progressive bool) *Agent {
@@ -47,6 +50,13 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	fmt.Printf("Chat with %s [%s] (use 'ctrl-c' to quit)\n", a.name, a.provider.Model())
 
+	if a.logTokens {
+		defer func() {
+			fmt.Printf("\u001b[90m[totals] turns=%d prompt=%d completion=%d\u001b[0m\n",
+				a.turnCount, a.promptTokenTotal, a.completionTokenTotal)
+		}()
+	}
+
 	readUser := true
 	for {
 		if readUser {
@@ -63,6 +73,10 @@ func (a *Agent) Run(ctx context.Context) error {
 			return err
 		}
 		conversation = append(conversation, reply)
+
+		a.turnCount++
+		a.promptTokenTotal += reply.PromptTokens
+		a.completionTokenTotal += reply.CompletionTokens
 
 		if a.logTokens {
 			fmt.Printf("\u001b[90m[tokens] prompt=%d completion=%d\u001b[0m\n", reply.PromptTokens, reply.CompletionTokens)

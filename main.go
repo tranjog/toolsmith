@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"agent/llm"
 	"agent/tools"
@@ -43,6 +44,7 @@ func main() {
 	nameFlag := flag.String("agent-name", envOr("TOOLSMITH_AGENT_NAME", "agent"), "Display name for the agent")
 	logTokensFlag := flag.Bool("log-tokens", envBool("TOOLSMITH_LOG_TOKENS"), "Log prompt/completion token counts per turn")
 	discoveryFlag := flag.String("tool-discovery", envOr("TOOLSMITH_TOOL_DISCOVERY", "static"), "Tool exposure: static | progressive")
+	scriptFlag := flag.String("script", envOr("TOOLSMITH_SCRIPT", ""), "Read user turns from a file (one turn per non-blank line). Exits when the file is exhausted.")
 	flag.Parse()
 
 	if *modelFlag == "" {
@@ -52,16 +54,14 @@ func main() {
 
 	provider, err := buildProvider(*providerFlag, *urlFlag, *modelFlag, *apiKeyFlag)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		fmt.Fprintf(os.Stderr, "error: %s\n", err.Error())
 		os.Exit(2)
 	}
 
-	scanner := bufio.NewScanner(os.Stdin)
-	getUserMessage := func() (string, bool) {
-		if !scanner.Scan() {
-			return "", false
-		}
-		return scanner.Text(), true
+	getUserMessage, err := userMessageSource(*scriptFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		os.Exit(2)
 	}
 
 	registry := tools.NewRegistry(tools.ReadFile, tools.ListFiles, tools.EditFile, tools.Grep, tools.Bash, tools.WebFetch)
@@ -85,6 +85,36 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 		os.Exit(1)
 	}
+}
+
+func userMessageSource(scriptPath string) (func() (string, bool), error) {
+	if scriptPath == "" {
+		scanner := bufio.NewScanner(os.Stdin)
+		return func() (string, bool) {
+			if !scanner.Scan() {
+				return "", false
+			}
+			return scanner.Text(), true
+		}, nil
+	}
+
+	data, err := os.ReadFile(scriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("script %q: %w", scriptPath, err)
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	return func() (string, bool) {
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			fmt.Printf("\u001b[94mYou\u001b[0m: %s\n", line)
+			return line, true
+		}
+		return "", false
+	}, nil
 }
 
 func buildProvider(kind, url, model, apiKey string) (llm.Provider, error) {
