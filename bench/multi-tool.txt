@@ -1,0 +1,3 @@
+list files under the tools directory
+grep for ToolDefinition across the repo
+read tools/read_file.go and tell me what it does
