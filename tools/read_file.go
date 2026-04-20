@@ -11,8 +11,10 @@ import (
 const maxReadBytes = 1 << 20 // 1 MiB
 
 var ReadFile = ToolDefinition{
-	Name:        "read_file",
-	Description: "Read contents of a file. Path relative to working directory. Optional line offset/limit for large files.",
+	Name:             "read_file",
+	Description:      "Read contents of a file. Path relative to working directory. Optional line offset/limit for large files.",
+	ShortDescription: "Read file contents",
+	Category:         "fs",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{

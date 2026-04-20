@@ -16,8 +16,10 @@ const (
 )
 
 var Bash = ToolDefinition{
-	Name:        "bash",
-	Description: "Run a bash script. Returns combined stdout+stderr. Default timeout 120s (max 600s). Output truncated at 64 KiB.",
+	Name:             "bash",
+	Description:      "Run a bash script. Returns combined stdout+stderr. Default timeout 120s (max 600s). Output truncated at 64 KiB.",
+	ShortDescription: "Run a bash script",
+	Category:         "shell",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{

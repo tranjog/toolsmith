@@ -13,6 +13,8 @@ var EditFile = ToolDefinition{
 	Description: `Edit a text file by replacing old_str with new_str. old_str and new_str must differ.
 If file does not exist and old_str is empty, the file is created with new_str as contents.
 Otherwise old_str must appear exactly once in the file.`,
+	ShortDescription: "Edit or create a text file",
+	Category:         "fs",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
