@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -200,6 +201,12 @@ func extractJSONFilter(body []byte, filter string) (string, error) {
 	default:
 		payload = results
 	}
+	if isEmptyExtract(payload) {
+		if rm, ok := root.(map[string]any); ok {
+			return "", fmt.Errorf("jq filter %q produced no data; response top-level keys: %s", filter, strings.Join(sortedKeys(rm), ", "))
+		}
+		return "", fmt.Errorf("jq filter %q produced no data", filter)
+	}
 	if s, ok := payload.(string); ok {
 		return s, nil
 	}
@@ -208,6 +215,35 @@ func extractJSONFilter(body []byte, filter string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+func isEmptyExtract(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case map[string]any:
+		if len(t) == 0 {
+			return true
+		}
+		for _, x := range t {
+			if x != nil {
+				return false
+			}
+		}
+		return true
+	case []any:
+		if len(t) == 0 {
+			return true
+		}
+		for _, x := range t {
+			if x != nil {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func walkJSONPath(root any, path string) (any, error) {
@@ -225,7 +261,7 @@ func walkJSONPath(root any, path string) (any, error) {
 			}
 			v, ok := m[t]
 			if !ok {
-				return nil, fmt.Errorf("path %q: key %q not found at segment %d", path, t, i)
+				return nil, fmt.Errorf("path %q: key %q not found at segment %d; available keys: %s", path, t, i, strings.Join(sortedKeys(m), ", "))
 			}
 			cur = v
 		case int:
@@ -240,6 +276,15 @@ func walkJSONPath(root any, path string) (any, error) {
 		}
 	}
 	return cur, nil
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func tokenizeJSONPath(p string) ([]any, error) {
