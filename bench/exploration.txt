@@ -1,3 +1,0 @@
-list every .go file in this repo
-read llm/llm.go and tell me the core types
-grep for Provider across the repo and summarize the matches
