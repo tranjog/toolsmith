@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/itchyny/gojq"
 )
 
 const (
@@ -21,8 +23,8 @@ const (
 
 var WebFetch = ToolDefinition{
 	Name:             "web_fetch",
-	Description:      "Fetch a URL. Returns JSON bodies verbatim; strips tags/scripts/styles from HTML. Useful for search engine result pages or JSON APIs. Output truncated at 10000 chars. For JSON responses, pass an optional dot/bracket path (e.g. `current.temperature_2m`, `list[0].name`) to extract a single value before truncation — much smaller payload than the full document.",
-	ShortDescription: "Fetch a URL and return text",
+	Description:      "Fetch a URL. Returns JSON bodies verbatim; strips tags/scripts/styles from HTML. Output truncated at 10000 chars. For JSON, prefer an optional extractor to shrink the payload before truncation: `path` (single dot/bracket path, e.g. `current.temperature_2m`), `paths` (array of such paths, returns `{path: value}` map), or `filter` (a jq program, e.g. `.daily | {time, tmax: .temperature_2m_max}`). Use `filter` when you need to reshape parallel arrays into paired records.",
+	ShortDescription: "Fetch a URL (JSON) with optional jq `filter`, `paths` array, or single `path` extractor",
 	Category:         "web",
 	InputSchema: map[string]any{
 		"type": "object",
@@ -33,7 +35,16 @@ var WebFetch = ToolDefinition{
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Optional. For JSON responses, extract a single value by dot/bracket path (e.g. `current.temperature_2m`, `results[0].name`). Omit to return the whole body.",
+				"description": "Optional. Single dot/bracket path to extract one value from a JSON response (e.g. `current.temperature_2m`, `results[0].name`).",
+			},
+			"paths": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Optional. List of dot/bracket paths. Returns a JSON object keyed by path string, each mapped to the extracted value.",
+			},
+			"filter": map[string]any{
+				"type":        "string",
+				"description": "Optional. A jq program run over the JSON body. Most powerful option — can reshape parallel arrays, e.g. `.daily | {time, tmax: .temperature_2m_max, tmin: .temperature_2m_min}`.",
 			},
 		},
 		"required": []string{"url"},
@@ -42,8 +53,10 @@ var WebFetch = ToolDefinition{
 }
 
 type webFetchInput struct {
-	URL  string `json:"url"`
-	Path string `json:"path,omitempty"`
+	URL    string   `json:"url"`
+	Path   string   `json:"path,omitempty"`
+	Paths  []string `json:"paths,omitempty"`
+	Filter string   `json:"filter,omitempty"`
 }
 
 var webFetchClient = &http.Client{Timeout: webFetchTimeout}
@@ -89,6 +102,20 @@ func webFetchFn(input json.RawMessage) (string, error) {
 
 	switch {
 	case strings.Contains(ct, "json"):
+		if in.Filter != "" {
+			extracted, err := extractJSONFilter(body, in.Filter)
+			if err != nil {
+				return "", err
+			}
+			return truncate(extracted, maxWebFetchChars), nil
+		}
+		if len(in.Paths) > 0 {
+			extracted, err := extractJSONPaths(body, in.Paths)
+			if err != nil {
+				return "", err
+			}
+			return truncate(extracted, maxWebFetchChars), nil
+		}
 		if in.Path != "" {
 			extracted, err := extractJSONPath(body, in.Path)
 			if err != nil {
@@ -109,9 +136,84 @@ func extractJSONPath(body []byte, path string) (string, error) {
 	if err := json.Unmarshal(body, &root); err != nil {
 		return "", fmt.Errorf("parse json: %w", err)
 	}
-	tokens, err := tokenizeJSONPath(path)
+	v, err := walkJSONPath(root, path)
 	if err != nil {
 		return "", err
+	}
+	if s, ok := v.(string); ok {
+		return s, nil
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func extractJSONPaths(body []byte, paths []string) (string, error) {
+	var root any
+	if err := json.Unmarshal(body, &root); err != nil {
+		return "", fmt.Errorf("parse json: %w", err)
+	}
+	result := make(map[string]any, len(paths))
+	for _, p := range paths {
+		v, err := walkJSONPath(root, p)
+		if err != nil {
+			return "", err
+		}
+		result[p] = v
+	}
+	out, err := json.Marshal(result)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func extractJSONFilter(body []byte, filter string) (string, error) {
+	var root any
+	if err := json.Unmarshal(body, &root); err != nil {
+		return "", fmt.Errorf("parse json: %w", err)
+	}
+	q, err := gojq.Parse(filter)
+	if err != nil {
+		return "", fmt.Errorf("jq parse: %w", err)
+	}
+	iter := q.Run(root)
+	var results []any
+	for {
+		v, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if e, ok := v.(error); ok {
+			return "", fmt.Errorf("jq run: %w", e)
+		}
+		results = append(results, v)
+	}
+	var payload any
+	switch len(results) {
+	case 0:
+		payload = nil
+	case 1:
+		payload = results[0]
+	default:
+		payload = results
+	}
+	if s, ok := payload.(string); ok {
+		return s, nil
+	}
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func walkJSONPath(root any, path string) (any, error) {
+	tokens, err := tokenizeJSONPath(path)
+	if err != nil {
+		return nil, err
 	}
 	cur := root
 	for i, tok := range tokens {
@@ -119,32 +221,25 @@ func extractJSONPath(body []byte, path string) (string, error) {
 		case string:
 			m, ok := cur.(map[string]any)
 			if !ok {
-				return "", fmt.Errorf("path %q: segment %d (%q) expects object, got %T", path, i, t, cur)
+				return nil, fmt.Errorf("path %q: segment %d (%q) expects object, got %T", path, i, t, cur)
 			}
 			v, ok := m[t]
 			if !ok {
-				return "", fmt.Errorf("path %q: key %q not found at segment %d", path, t, i)
+				return nil, fmt.Errorf("path %q: key %q not found at segment %d", path, t, i)
 			}
 			cur = v
 		case int:
 			a, ok := cur.([]any)
 			if !ok {
-				return "", fmt.Errorf("path %q: segment %d ([%d]) expects array, got %T", path, i, t, cur)
+				return nil, fmt.Errorf("path %q: segment %d ([%d]) expects array, got %T", path, i, t, cur)
 			}
 			if t < 0 || t >= len(a) {
-				return "", fmt.Errorf("path %q: index %d out of range (len %d) at segment %d", path, t, len(a), i)
+				return nil, fmt.Errorf("path %q: index %d out of range (len %d) at segment %d", path, t, len(a), i)
 			}
 			cur = a[t]
 		}
 	}
-	if s, ok := cur.(string); ok {
-		return s, nil
-	}
-	out, err := json.Marshal(cur)
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
+	return cur, nil
 }
 
 func tokenizeJSONPath(p string) ([]any, error) {
