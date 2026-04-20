@@ -8,8 +8,11 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/itchyny/gojq"
 )
 
 const (
@@ -21,8 +24,8 @@ const (
 
 var WebFetch = ToolDefinition{
 	Name:             "web_fetch",
-	Description:      "Fetch a URL. Returns JSON bodies verbatim; strips tags/scripts/styles from HTML. Useful for search engine result pages or JSON APIs. Output truncated at 10000 chars.",
-	ShortDescription: "Fetch a URL and return text",
+	Description:      "Fetch a URL. Returns JSON verbatim; strips HTML tags/scripts/styles. 10000-char output cap. For JSON, an optional jq `filter` extracts and reshapes data before truncation (e.g. `.current.temperature_2m`, `.daily | {time, tmax: .temperature_2m_max}`).",
+	ShortDescription: "Fetch a URL; optional jq `filter` extractor for JSON",
 	Category:         "web",
 	InputSchema: map[string]any{
 		"type": "object",
@@ -31,6 +34,10 @@ var WebFetch = ToolDefinition{
 				"type":        "string",
 				"description": "Absolute URL (http/https).",
 			},
+			"filter": map[string]any{
+				"type":        "string",
+				"description": "Optional jq program applied to a JSON response body, e.g. `.current.temperature_2m` or `.daily | {time, tmax: .temperature_2m_max}`.",
+			},
 		},
 		"required": []string{"url"},
 	},
@@ -38,7 +45,8 @@ var WebFetch = ToolDefinition{
 }
 
 type webFetchInput struct {
-	URL string `json:"url"`
+	URL    string `json:"url"`
+	Filter string `json:"filter,omitempty"`
 }
 
 var webFetchClient = &http.Client{Timeout: webFetchTimeout}
@@ -75,21 +83,105 @@ func webFetchFn(input json.RawMessage) (string, error) {
 		return "", err
 	}
 
-	ct := strings.ToLower(resp.Header.Get("Content-Type"))
 	text := string(body)
-
 	if resp.StatusCode >= 400 {
 		return truncate(text, maxWebFetchChars), fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
+	ct := strings.ToLower(resp.Header.Get("Content-Type"))
 	switch {
 	case strings.Contains(ct, "json"):
+		if in.Filter != "" {
+			extracted, err := extractJSONFilter(body, in.Filter)
+			if err != nil {
+				return "", err
+			}
+			return truncate(extracted, maxWebFetchChars), nil
+		}
 		return truncate(text, maxWebFetchChars), nil
 	case strings.Contains(ct, "html"), strings.Contains(ct, "xml"):
 		return truncate(stripHTML(text), maxWebFetchChars), nil
 	default:
 		return truncate(text, maxWebFetchChars), nil
 	}
+}
+
+func extractJSONFilter(body []byte, filter string) (string, error) {
+	var root any
+	if err := json.Unmarshal(body, &root); err != nil {
+		return "", fmt.Errorf("parse json: %w", err)
+	}
+	q, err := gojq.Parse(filter)
+	if err != nil {
+		return "", fmt.Errorf("jq parse: %w", err)
+	}
+	iter := q.Run(root)
+	var results []any
+	for {
+		v, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if e, ok := v.(error); ok {
+			return "", fmt.Errorf("jq run: %w", e)
+		}
+		results = append(results, v)
+	}
+	var payload any
+	switch len(results) {
+	case 0:
+		payload = nil
+	case 1:
+		payload = results[0]
+	default:
+		payload = results
+	}
+	if isEmpty(payload) {
+		if rm, ok := root.(map[string]any); ok {
+			return "", fmt.Errorf("filter %q produced no data; response top-level keys: %s", filter, strings.Join(sortedKeys(rm), ", "))
+		}
+		return "", fmt.Errorf("filter %q produced no data", filter)
+	}
+	if s, ok := payload.(string); ok {
+		return s, nil
+	}
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func isEmpty(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case map[string]any:
+		for _, x := range t {
+			if x != nil {
+				return false
+			}
+		}
+		return true
+	case []any:
+		for _, x := range t {
+			if x != nil {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 var (

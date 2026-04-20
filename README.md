@@ -68,7 +68,7 @@ Registered in `main.go` through a `tools.Registry` and handed to the model each 
 | `edit_file`  | Replace a unique `old_str` with `new_str`. Creates a new file when `old_str` is empty and the file does not exist. Atomic write. |
 | `grep`       | RE2 regex search across files. Supports `glob`, `ignore_case`, `max_results`. Skips binaries and vendored dirs. |
 | `bash`       | Run a `bash -c` script. Optional `cwd`, `timeout_s` (default 120s, max 600s). Output capped at 64 KiB. |
-| `web_fetch`  | GET a URL. Returns JSON verbatim; strips tags/scripts from HTML. 10k-char cap.                |
+| `web_fetch`  | GET a URL. Returns JSON verbatim; strips tags/scripts from HTML. 10k-char cap. For JSON, an optional jq `filter` (e.g. `.current.temperature_2m`, `.daily \| {time, tmax: .temperature_2m_max}`) extracts and reshapes the payload before truncation. |
 
 ## Tool discovery
 
